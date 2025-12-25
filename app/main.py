@@ -1,16 +1,12 @@
-#!/usr/bin/env python
-# -*- coding: UTF-8 -*-
-"""
-@File ：main.py
-@Author ：zqy
-@Email : zqingy@work@163.com 
-@note: 
-"""
+import json
 import logging
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
+
 from app.infra.logging import setup_logging, new_trace_id
 from app.agent.schemas import ChatRequest, ChatResponse
 from app.agent.core import generate_plan, run_tools
+from app.agent.reply import stream_final_reply
 
 setup_logging()
 log = logging.getLogger("api")
@@ -19,19 +15,11 @@ app = FastAPI(title="Edu Agent MVP")
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
-    """
-    FastAPI 对话接口 /chat
-    Agent 支持：意图识别 → 生成计划 → 工具调用 → 结构化输出
-    有：日志、trace_id、错误重试、基本提示注入防护（入门版）
-    :param req:
-    :return:
-    """
-    # 生成计划
-    trace_id = new_trace_id() # 生成trace_id
-    plan = await generate_plan(req.user_id, req.message) # 生成计划
+    trace_id = new_trace_id()
+    plan = await generate_plan(req.user_id, req.message)
     tool_results = await run_tools(req.user_id, plan) if plan.tool_calls else None
 
-    # 最简单的回复策略：把计划步骤整理成自然语言
+    # 仍然保留非流式版本（方便调试 / 兼容）
     reply_lines = []
     if plan.intent in ("tutor", "practice", "plan") and plan.steps:
         reply_lines.append("我给你一个可执行的建议：")
@@ -49,3 +37,27 @@ async def chat(req: ChatRequest):
         plan=plan,
         tool_results=tool_results,
     )
+
+@app.post("/chat/stream")
+async def chat_stream(req: ChatRequest):
+    """
+    SSE 流式输出接口：
+    - 返回 text/event-stream
+    - 客户端可以边接收边显示，体验更好
+    """
+    trace_id = new_trace_id()
+    plan = await generate_plan(req.user_id, req.message)
+    tool_results = await run_tools(req.user_id, plan) if plan.tool_calls else None
+
+    async def event_gen():
+        # 先把 trace_id 发给前端（前端可用于关联日志/排障）
+        yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+
+        # 再流式输出正文
+        async for chunk in stream_final_reply(req.message, plan.model_dump(), tool_results):
+            # SSE 协议格式：data: xxx\n\n
+            yield f"data: {chunk}\n\n"
+
+        yield "event: done\ndata: [DONE]\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")

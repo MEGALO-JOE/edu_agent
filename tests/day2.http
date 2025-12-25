@@ -1,0 +1,10 @@
+### 流式响应
+POST http://127.0.0.1:8000/chat/stream/
+Content-Type: application/json
+
+{
+    "user_id": "u1",
+    "message": "我想一周内把英语口语提到能面试，给我每日任务，并创建3个待办"
+}
+
+###

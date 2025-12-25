@@ -8,6 +8,8 @@
 """
 import re
 from app.agent.schemas import SpeakingState
+from app.agent.speaking_judge import judge_speaking_answer
+from app.agent.speaking_render import render_feedback_text
 from app.agent.state_store import get_state, save_state
 
 def _extract_minutes(text: str) -> int | None:
@@ -20,7 +22,7 @@ def _extract_minutes(text: str) -> int | None:
         return int(m.group(1))
     return None
 
-def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingState]:
+async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingState]:
     """
     speaking 陪练状态机：
     输入：用户一句话
@@ -66,32 +68,36 @@ def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingState]:
 
     # --------- PRACTICE：等待用户回答 ----------
     if state.stage == "PRACTICE":
-        # 用户这轮就是回答，我们下一轮给反馈
+        # 用户这一轮是在回答题目，我们先把回答保存下来
+        state.last_answer = user_message
         state.stage = "FEEDBACK"
         save_state(user_id, state)
+
+        # 这里不调用 LLM（省钱），只是告诉用户“我将要反馈”
         reply = (
-            "收到！我下一条会按三个维度给你反馈：\n"
-            "1) 语法/用词\n"
-            "2) 更地道的表达\n"
-            "3) 结构与逻辑\n\n"
-            "你也可以补充：你想偏“更正式面试风”还是“更自然口语风”？"
+            "收到你的回答了 ✅\n"
+            "我下一条会给你：评分 + 纠错点 + 更自然的改写版本 + 下一题。"
         )
         return reply, state
 
     # --------- FEEDBACK：给反馈 + 下一题 ----------
-    if state.stage == "FEEDBACK":
-        # Day4 先不调用 LLM 做精细纠错（明天 Day5 再接 LLM 评审器）
-        reply = (
-            "反馈（先给你一个通用模板，你照着替换内容就能更像面试表达）：\n"
-            "- 开头：Hi, I’m ... I currently ...\n"
-            "- 中段：I have experience in ... / I’m good at ...\n"
-            "- 亮点：One project I’m proud of is ... (结果 + 数据)\n"
-            "- 结尾：I’m excited about ... because ...\n\n"
-            "下一题：请用英语回答：Tell me about a challenge you faced and how you solved it.（尽量按 STAR：Situation-Task-Action-Result）"
-        )
+    elif state.stage == "FEEDBACK":
+        # 取出上一题和用户回答，交给 LLM 做评审
+        question = state.last_question or "Please do a 30-second self-introduction."
+        answer = state.last_answer or ""
+
+        # ✅ 这里才调用 LLM（成本集中在“反馈”而不是“闲聊”）
+        fb = await judge_speaking_answer(question=question, answer=answer)
+
+        # 渲染为纯文本（不让 LLM 直接输出最终回复，避免污染）
+        reply = render_feedback_text(fb)
+
+        # 状态推进：下一轮继续 PRACTICE，题目更新为 next_question
         state.stage = "PRACTICE"
-        state.last_question = "Tell me about a challenge you faced and how you solved it."
+        state.last_question = fb.next_question
+        state.last_answer = None
         save_state(user_id, state)
+
         return reply, state
 
     # 兜底

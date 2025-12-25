@@ -61,7 +61,7 @@ async def chat_stream(req: ChatRequest):
     async def event_gen():
 
         if intent_res.domain == "speaking":
-            text, _ = speaking_next(req.user_id, req.message)
+            text, _ = await speaking_next(req.user_id, req.message)
             async for chunk in stream_text(text):
                 yield f"data: {chunk}\n\n"
         else:

@@ -1,0 +1,35 @@
+### 1. 练英语口语面试
+POST http://127.0.0.1:8000/chat/stream/
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "我想练英语口语面试，每天30分钟"
+}
+
+### 2. 等级
+POST http://127.0.0.1:8000/chat/stream/
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "B1"
+}
+
+### 3. 自我介绍
+POST http://127.0.0.1:8000/chat/stream/
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "我想把自我介绍说得更流畅"
+}
+
+### 4. 自我介绍内容
+POST http://127.0.0.1:8000/chat/stream/
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "Hi, I'm Tom. I am a backend engineer. I worked on payment system and improved performance."
+}

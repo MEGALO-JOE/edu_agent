@@ -7,8 +7,6 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 from app.agent.json_utils import extract_json_object
 from app.agent.prompts import SYSTEM_PROMPT, PLAN_INSTRUCTION
 from app.agent.schemas import AgentPlan
-from app.agent.speaking_flow import speaking_next
-from app.agent.text_stream import stream_text
 from app.agent.tools import TOOL_REGISTRY
 from app.infra.settings import settings
 
@@ -19,6 +17,8 @@ async def call_llm(messages: list[dict]) -> str:
     """
     封装一次 LLM 调用，并带有指数退避重试。
     重试覆盖：网络抖动、5xx、短时限流等。
+    :param messages: LLM 调用的消息列表
+    :return: LLM 回复的文本
     """
     headers = {"Authorization": f"Bearer {settings.LLM_API_KEY}"}
     payload = {

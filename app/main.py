@@ -3,6 +3,7 @@ import logging
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 
+from app.agent.stream_utils import coalesce_chunks
 from app.infra.logging import setup_logging, new_trace_id
 from app.agent.schemas import ChatRequest, ChatResponse
 from app.agent.core import generate_plan, run_tools
@@ -54,7 +55,7 @@ async def chat_stream(req: ChatRequest):
         yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
         # 再流式输出正文
-        async for chunk in stream_final_reply(req.message, plan.model_dump(), tool_results):
+        async for chunk in coalesce_chunks(stream_final_reply(req.message, plan.model_dump(), tool_results)):
             # SSE 协议格式：data: xxx\n\n
             yield f"data: {chunk}\n\n"
 

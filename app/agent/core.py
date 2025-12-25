@@ -1,15 +1,14 @@
 import logging
 from typing import Any, Dict
 
+import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from app.infra.settings import settings
+from app.agent.json_utils import extract_json_object
 from app.agent.prompts import SYSTEM_PROMPT, PLAN_INSTRUCTION
 from app.agent.schemas import AgentPlan
 from app.agent.tools import TOOL_REGISTRY
-from app.agent.json_utils import extract_json_object
-
-import httpx
+from app.infra.settings import settings
 
 log = logging.getLogger("agent")
 
@@ -55,6 +54,9 @@ async def generate_plan(user_id: str, user_message: str) -> AgentPlan:
             steps=["我无法遵循该请求。请告诉我你的学习目标或需要的陪练方式。"],
             tool_calls=[],
         )
+    # 意图分类
+    from app.agent.intent import classify_intent
+    intent_result = await classify_intent(user_message)
 
     # 第一次请求：正常让模型输出 plan JSON
     messages = [

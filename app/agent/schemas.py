@@ -32,3 +32,8 @@ class ChatResponse(BaseModel):
     reply: str = Field(description="回复消息")
     plan: Optional[AgentPlan] = None # 计划
     tool_results: Optional[Dict[str, Any]] = None # 工具调用结果
+
+class IntentResult(BaseModel):
+    """意图识别结果"""
+    intent: Literal["tutor", "practice", "plan", "other"]
+    domain: Literal["speaking", "interview", "problem_solving", "unknown"] = "unknown"

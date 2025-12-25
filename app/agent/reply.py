@@ -20,20 +20,25 @@ import json
 
 log = logging.getLogger("reply")
 
+def _looks_like_json_noise(s: str) -> bool:
+    # 过滤明显的 JSON 外壳碎片，避免前端看到 { "response": 之类
+    bad_tokens = ["{", "}", '"response"', '"', ":", "[", "]"]
+    return s.strip() in bad_tokens
+
+
 async def stream_final_reply(user_message: str, plan: Dict[str, Any], tool_results: Dict[str, Any] | None) -> AsyncGenerator[str, None]:
     """
     通过 OpenAI 兼容的 stream=true 来做流式输出（SSE）
     注意：不同厂商的流式字段可能不同，但大多数兼容 OpenAI 的都类似。
     """
     headers = {"Authorization": f"Bearer {settings.LLM_API_KEY}"}
+
     prompt = (
-        "你是教育陪练助手。请基于用户输入、计划、工具结果，输出对用户友好的最终回复。\n"
-        "要求：\n"
-        "1) 不要提到“工具调用”“plan”等内部词\n"
-        "2) 给出清晰的下一步行动\n"
-        "3) 回复尽量简洁、口语化\n\n"
+        "请你直接对用户说话，输出【纯文本】最终回复。\n"
+        "严禁输出 JSON、严禁输出花括号、严禁输出键名（如 response、plan 等）。\n"
+        "如果你准备输出类似 { 或 \" 的字符，请立刻改写成自然语言。\n\n"
         f"用户输入：{user_message}\n"
-        f"计划：{plan}\n"
+        f"计划要点：{plan.get('steps')}\n"
         f"工具结果：{tool_results}\n"
     )
 
@@ -64,7 +69,7 @@ async def stream_final_reply(user_message: str, plan: Dict[str, Any], tool_resul
                     try:
                         obj = json.loads(data) # 解析 JSON
                         delta = obj["choices"][0]["delta"].get("content")
-                        if delta:
+                        if delta and not _looks_like_json_noise(delta):
                             yield delta
                     except Exception:
                         continue

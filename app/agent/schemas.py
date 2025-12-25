@@ -37,3 +37,20 @@ class IntentResult(BaseModel):
     """意图识别结果"""
     intent: Literal["tutor", "practice", "plan", "other"]
     domain: Literal["speaking", "interview", "problem_solving", "unknown"] = "unknown"
+
+
+class SpeakingProfile(BaseModel):
+    """
+    用户画像：陪练必须有“上下文”，否则就会瞎给建议
+    """
+    level: Optional[str] = None         # 例如 A2/B1/B2 或 “能日常交流/能面试”
+    goal: Optional[str] = None          # 例如 “一周后面试自我介绍更流畅”
+    daily_minutes: Optional[int] = None # 每天可投入分钟数
+
+class SpeakingState(BaseModel):
+    """
+    状态机状态：服务端保存，不依赖模型记忆
+    """
+    stage: Literal["ONBOARDING", "PRACTICE", "FEEDBACK"] = "ONBOARDING"
+    profile: SpeakingProfile = Field(default_factory=SpeakingProfile)
+    last_question: Optional[str] = None

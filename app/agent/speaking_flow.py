@@ -40,6 +40,7 @@ async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingS
         # 简单判断 level/goal（先用关键词，不够精也没关系）
         if any(k in user_message for k in ["A1", "A2", "B1", "B2", "C1", "C2"]):
             state.profile.level = user_message.strip()
+            state.profile.goal = ""
         if any(k in user_message for k in ["面试", "自我介绍", "口语", "流利", "发音", "工作"]):
             state.profile.goal = user_message.strip()
 

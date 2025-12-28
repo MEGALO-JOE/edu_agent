@@ -61,6 +61,7 @@ class SpeakingState(BaseModel):
     profile: SpeakingProfile = Field(default_factory=SpeakingProfile)
     last_question: Optional[str] = None
     last_answer: Optional[str] = None  # ✅ 新增：保存上一轮用户回答，供 FEEDBACK 评审
+    domain: Literal["speaking", "interview", "problem_solving", "unknown"] = "unknown"
 
 
 

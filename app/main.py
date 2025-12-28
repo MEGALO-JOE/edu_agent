@@ -6,11 +6,10 @@ from fastapi.responses import StreamingResponse
 
 from app.agent.core import generate_plan, run_tools
 from app.agent.intent import classify_intent
-from app.agent.reply import stream_final_reply
 from app.agent.reply_templates import render_plan_reply
 from app.agent.schemas import ChatRequest, ChatResponse
 from app.agent.speaking_flow import speaking_next
-from app.agent.stream_utils import coalesce_chunks
+from app.agent.state_store import get_state
 from app.agent.text_stream import stream_text
 from app.infra.logging import setup_logging, new_trace_id
 
@@ -49,33 +48,70 @@ async def chat(req: ChatRequest):
 @app.post("/chat/stream")
 async def chat_stream(req: ChatRequest):
     """
-    SSE 流式输出接口：
-    - 返回 text/event-stream
-    - 客户端可以边接收边显示，体验更好
+    SSE 流式输出接口（核心：先路由，再决定走哪条链路）
     """
     trace_id = new_trace_id()
 
-    # 在生成 plan 之前先分类（更像真实架构：router 决策）
-    intent_res = await classify_intent(req.message)
-
     async def event_gen():
+        # 1) 先发 meta，便于前端/日志关联
+        yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
 
-        if intent_res.domain == "speaking":
-            text, _ = await speaking_next(req.user_id, req.message)
-            async for chunk in stream_text(text):
-                yield f"data: {chunk}\n\n"
+        # 0) 如果用户已经在 speaking 会话中：不做 intent，直接继续状态机
+        #    （因为状态机里有很多逻辑，你不希望它被 interrupt）
+        state = get_state(req.user_id)
+        if state.domain == "speaking":
+            if state.stage == 'ONBOARDING':
+                text, _ = await speaking_next(req.user_id, req.message)
+                async for chunk in stream_text(text):
+                    yield f"{chunk}\n\n"
+                yield "event: done\ndata: [DONE]\n\n"
+                return
+            elif state.stage == 'PRACTICE':
+                text, _ = await speaking_next(req.user_id, req.message)
+                async for chunk in stream_text(text):
+                    yield f"{chunk}\n\n"
+                if state.stage == 'FEEDBACK':
+                    text, _ = await speaking_next(req.user_id, req.message)
+                    async for chunk in stream_text(text):
+                        yield f"{chunk}\n\n"
+                yield "event: done\ndata: [DONE]\n\n"
+                return
         else:
-            plan = await generate_plan(req.user_id, req.message)
-            tool_results = await run_tools(req.user_id, plan) if plan.tool_calls else None
+            # 2) ✅ 最重要：先做 intent 分类
+            intent_res = await classify_intent(req.message)
+            state.domain = intent_res.domain
 
-            # 先把 trace_id 发给前端（前端可用于关联日志/排障）
-            yield f"event: meta\ndata: {json.dumps({'trace_id': trace_id}, ensure_ascii=False)}\n\n"
+            # 3) ✅ speaking（口语/自我介绍）优先走状态机，不走 generate_plan
+            #    这样你就不会再看到 next_steps/todos/title 这些伪字段污染
+            if intent_res.domain == "speaking":
+                text, _ = await speaking_next(req.user_id, req.message)
+                async for chunk in stream_text(text):
+                    yield f"{chunk}\n\n"
+                yield "event: done\ndata: [DONE]\n\n"
+                return
 
-            # 再流式输出正文
-            async for chunk in coalesce_chunks(stream_final_reply(req.message, plan.model_dump(), tool_results)):
-                # SSE 协议格式：data: xxx\n\n
+        # 4) 其他 domain 才走原来的 plan + tool
+        plan = await generate_plan(req.user_id, req.message)
+        tool_results = await run_tools(req.user_id, plan) if plan.tool_calls else None
+
+        # 4.1 plan 场景：服务端模板输出（可控）
+        if plan.intent == "plan":
+            final_text = render_plan_reply(plan, tool_results)
+            async for chunk in stream_text(final_text):
                 yield f"data: {chunk}\n\n"
+            yield "event: done\ndata: [DONE]\n\n"
+            return
+
+        # 4.2 非 plan：你可以暂时也用模板兜底（建议），避免 LLM 流式污染
+        #     Day5 我们会把 speaking 的 FEEDBACK 才引入 LLM judge（结构化）
+        fallback = "我可以帮你做口语陪练。你想练：自我介绍 / 项目介绍 / 行为面试（STAR）？"
+        async for chunk in stream_text(fallback):
+            yield f"data: {chunk}\n\n"
 
         yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+if __name__ == '__main__':
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)

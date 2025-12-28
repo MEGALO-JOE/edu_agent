@@ -6,11 +6,15 @@
 @Email : zqingy@work@163.com 
 @note:  陪练逻辑（Day4 先做最小闭环）
 """
+import logging
 import re
 from app.agent.schemas import SpeakingState
 from app.agent.speaking_judge import judge_speaking_answer
 from app.agent.speaking_render import render_feedback_text
 from app.agent.state_store import get_state, save_state
+from app.agent.memory.repo import upsert_profile, insert_attempt, get_avg_scores
+
+logger = logging.getLogger(__name__)
 
 def _extract_minutes(text: str) -> int | None:
     """
@@ -21,6 +25,7 @@ def _extract_minutes(text: str) -> int | None:
     if m:
         return int(m.group(1))
     return None
+
 
 async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingState]:
     """
@@ -65,10 +70,23 @@ async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingS
         q = "我们开始模拟：请用英语做 30 秒自我介绍（包含：当前身份/擅长什么/最近一个项目亮点）。"
         state.last_question = q
         save_state(user_id, state)
+
+        upsert_profile(
+            user_id=user_id,
+            level=state.profile.level,
+            goal=state.profile.goal,
+            daily_minutes=state.profile.daily_minutes,
+            preferred_style=None
+        )
+
         return q, state
 
     # --------- PRACTICE：等待用户回答 ----------
     if state.stage == "PRACTICE":
+        # 粗略估 token：英文 4 chars ~ 1 token，中文更复杂但先用字符数守门
+        if len(user_message) > 1200:
+            return "你的回答有点长（>1200字）。请缩短到 30-60 秒口语长度，我再给你更精准的纠错。", state
+
         # 用户这一轮是在回答题目，我们先把回答保存下来
         state.last_answer = user_message
         state.stage = "FEEDBACK"
@@ -88,10 +106,39 @@ async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingS
         answer = state.last_answer or ""
 
         # ✅ 这里才调用 LLM（成本集中在“反馈”而不是“闲聊”）
-        fb = await judge_speaking_answer(question=question, answer=answer)
+        try:
+            fb = await judge_speaking_answer(question=question, answer=answer)
+            logger.info(
+                f"judge_scores={fb.overall_score}/{fb.fluency_score}/{fb.grammar_score}/{fb.vocabulary_score}/{fb.structure_score}")
+        except Exception:
+            # 降级：给通用反馈模板 + 下一题
+            reply = "我这次没能稳定生成评分，但我给你一个通用改写模板...（略）下一题：..."
+        else:
 
-        # 渲染为纯文本（不让 LLM 直接输出最终回复，避免污染）
-        reply = render_feedback_text(fb)
+            insert_attempt(
+                user_id=user_id,
+                question=question,
+                answer=answer,
+                feedback=fb.model_dump()
+            )
+
+            # 渲染为纯文本（不让 LLM 直接输出最终回复，避免污染）
+            reply = render_feedback_text(fb)
+
+            avg = get_avg_scores(user_id, last_n=10)
+            # 找到最低分项（简单 heuristic）
+            weakest = min(
+                [("fluency", avg["fluency"]), ("grammar", avg["grammar"]),
+                 ("vocabulary", avg["vocabulary"]), ("structure", avg["structure"])],
+                key=lambda x: x[1]
+            )[0]
+            logger.info(weakest)
+
+            # 把 weakest 用在下一题提示或 coaching（最简单：在中文建议末尾追加一句）
+            # 注意：这里不要改 fb 的结构字段（保持 judge 输出可控），你可以只在 render 阶段加一句
+            reply += f"\n你最近 10 次最弱项是：{weakest.title()}（{avg[weakest]:.1f}/10），下一轮我会重点要求你按 {weakest.title()} 讲 Result。"
+
+            #“你最近 10 次最弱项是：结构（5.5/10），下一轮我会重点要求你按 STAR 讲 Result。”
 
         # 状态推进：下一轮继续 PRACTICE，题目更新为 next_question
         state.stage = "PRACTICE"

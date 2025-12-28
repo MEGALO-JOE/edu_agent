@@ -6,6 +6,7 @@ from fastapi.responses import StreamingResponse
 
 from app.agent.core import generate_plan, run_tools
 from app.agent.intent import classify_intent
+from app.agent.memory.db import init_db
 from app.agent.reply_templates import render_plan_reply
 from app.agent.schemas import ChatRequest, ChatResponse
 from app.agent.speaking_flow import speaking_next
@@ -17,6 +18,7 @@ setup_logging()
 log = logging.getLogger("api")
 
 app = FastAPI(title="Edu Agent MVP")
+init_db()
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -112,6 +114,8 @@ async def chat_stream(req: ChatRequest):
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
 
+
 if __name__ == '__main__':
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

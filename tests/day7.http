@@ -1,0 +1,66 @@
+### RAG命中测试
+POST http://127.0.0.1:8000/kb/ask
+Content-Type: application/json
+
+{
+  "message": "STAR 方法怎么回答行为面试？请给我可执行建议",
+  "k": 3
+}
+
+
+### RAG miss测试
+POST http://127.0.0.1:8000/kb/ask
+Content-Type: application/json
+
+{
+  "message": "雅思写作Task2评分细则是什么？",
+  "k": 3
+}
+
+
+###  完整测试
+### 1. 练英语口语面试
+POST http://127.0.0.1:8000/chat/stream
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "我想练英语口语面试，每天30分钟"
+}
+
+### 2. 等级
+POST http://127.0.0.1:8000/chat/stream
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "B1"
+}
+
+### 3. 自我介绍
+POST http://127.0.0.1:8000/chat/stream
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "我想把自我介绍变得更流畅"
+}
+
+### 4. 自我介绍内容
+POST http://127.0.0.1:8000/chat/stream
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "Hi, I'm Tom. I am a backend engineer. I worked on payment system and improved performance."
+}
+
+
+### 5. 继续追问
+POST http://127.0.0.1:8000/chat/stream
+Content-Type: application/json
+
+{
+    "user_id": "u5",
+    "message": "At work, I tackled duplicate data deliveries and performance bottlenecks in a multi-instance Outbox pattern-based data sync system for an e-commerce platform. Multiple instances fetched the same Outbox records, causing duplicate API calls, while unoptimized polling led to database overload during peak hours."
+}

@@ -7,6 +7,9 @@ from fastapi.responses import StreamingResponse
 from app.agent.core import generate_plan, run_tools
 from app.agent.intent import classify_intent
 from app.agent.memory.db import init_db
+from app.agent.rag.answer import ask_with_rag
+from app.agent.rag.db import init_rag_tables
+from app.agent.rag.schemas import KBAskRequest
 from app.agent.reply_templates import render_plan_reply
 from app.agent.schemas import ChatRequest, ChatResponse
 from app.agent.speaking_flow import speaking_next
@@ -19,6 +22,7 @@ log = logging.getLogger("api")
 
 app = FastAPI(title="Edu Agent MVP")
 init_db()
+init_rag_tables()
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -113,6 +117,24 @@ async def chat_stream(req: ChatRequest):
         yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+
+# 直接问知识库
+@app.post("/kb/ask")
+async def kb_ask(req: KBAskRequest):
+    text, chunks = await ask_with_rag(req.message, k=req.k)
+    return {
+        "answer": text,
+        "citations": [
+            {
+                "cite_key": c.cite_key,
+                "title": c.title,
+                "chunk_index": c.chunk_index,
+                "chunk_id": c.chunk_id,
+            }
+            for c in chunks
+        ],
+    }
 
 
 if __name__ == '__main__':

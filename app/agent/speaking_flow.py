@@ -8,6 +8,8 @@
 """
 import logging
 import re
+
+from app.agent.rag.answer import ask_with_rag
 from app.agent.schemas import SpeakingState
 from app.agent.speaking_judge import judge_speaking_answer
 from app.agent.speaking_render import render_feedback_text
@@ -26,6 +28,28 @@ def _extract_minutes(text: str) -> int | None:
         return int(m.group(1))
     return None
 
+def pick_rag_query(fb) -> str:
+    """
+    根据评分选择检索主题（非常像教育产品的个性化策略）。
+    """
+    # 先找最弱项
+    scores = {
+        "fluency": fb.fluency_score,
+        "grammar": fb.grammar_score,
+        "vocabulary": fb.vocabulary_score,
+        "structure": fb.structure_score,
+    }
+    weakest = min(scores, key=scores.get)
+
+    # 根据 weakest 决定查什么
+    if weakest == "grammar":
+        return "B1 grammar common issues tips"
+    if weakest == "structure":
+        return "STAR method behavioral questions structure"
+    if weakest == "fluency":
+        return "speaking fluency short complete sentences tips"
+    # vocabulary
+    return "self introduction interview structure 30-60 seconds"
 
 async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingState]:
     """
@@ -136,13 +160,25 @@ async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingS
 
             # 把 weakest 用在下一题提示或 coaching（最简单：在中文建议末尾追加一句）
             # 注意：这里不要改 fb 的结构字段（保持 judge 输出可控），你可以只在 render 阶段加一句
+            #“你最近 10 次最弱项是：结构（5.5/10），下一轮我会重点要求你按 STAR 讲 Result。”
             reply += f"\n你最近 10 次最弱项是：{weakest.title()}（{avg[weakest]:.1f}/10），下一轮我会重点要求你按 {weakest.title()} 讲 Result。"
 
-            #“你最近 10 次最弱项是：结构（5.5/10），下一轮我会重点要求你按 STAR 讲 Result。”
+            rag_query = pick_rag_query(fb)
+            rag_text, used_chunks = await ask_with_rag(rag_query, k=3)
+            # 如果资料不足就不追加，避免污染输出
+            if used_chunks:
+                reply += "\n\n---\n基于资料的针对性建议（带引用）：\n"
+                reply += rag_text
+
+                # 可选：把引用来源列出来，用户看得更明白（非常加分）
+                reply += "\n\n引用来源：\n"
+                for c in used_chunks:
+                    reply += f"- [{c.cite_key}] {c.title}#{c.chunk_index}\n"
+
+            state.last_question = fb.next_question
 
         # 状态推进：下一轮继续 PRACTICE，题目更新为 next_question
         state.stage = "PRACTICE"
-        state.last_question = fb.next_question
         state.last_answer = None
         save_state(user_id, state)
 

@@ -112,6 +112,19 @@ def retrieve(query: str, k: int = 4) -> List[RetrievedChunk]:
     rows = cur.fetchall()
     conn.close()
 
+    # 2) 去重（相同 title + chunk_index 只保留一个）
+    #    （因为 kb_chunk 里的 chunk_index 是按文档顺序严格递增的）
+    seen = set()
+    deduped_rows = []
+    for r in rows:
+        key = (str(r["title"]), int(r["chunk_index"]))
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped_rows.append(r)
+
+    rows = deduped_rows
+
     results: List[RetrievedChunk] = []
     for i, r in enumerate(rows, 1):
         results.append(

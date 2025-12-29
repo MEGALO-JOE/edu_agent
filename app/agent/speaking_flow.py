@@ -118,8 +118,7 @@ async def speaking_next(user_id: str, user_message: str) -> tuple[str, SpeakingS
 
         # 这里不调用 LLM（省钱），只是告诉用户“我将要反馈”
         reply = (
-            "收到你的回答了 ✅\n"
-            "我下一条会给你：评分 + 纠错点 + 更自然的改写版本 + 下一题。"
+            "收到 ✅ 我正在分析你的回答（评分 + 纠错 + 改写 + 下一题）"
         )
         return reply, state
 

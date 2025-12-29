@@ -6,15 +6,23 @@
 @Email : zqingy@work@163.com 
 @note: 
 """
+import logging
 import re
 from typing import Tuple, List
 
-import logging
-
 from app.agent.core import call_llm
-from app.agent.rag.retriever import retrieve, RetrievedChunk
 from app.agent.rag.prompts import RAG_SYSTEM
+from app.agent.rag.retriever import retrieve, RetrievedChunk
+
 logger = logging.getLogger("rag")
+
+_RAG_CACHE = {}  # key: (query, k) -> (text, chunks_meta)
+
+
+def _extract_used_cite_keys(text: str) -> set[str]:
+    # 从回答中提取所有引用的 cite_key，如 ["C1", "C2"]
+    return set(re.findall(r"\[(C\d+)\]", text or ""))
+
 
 def _has_valid_citations(text: str, chunks: List[RetrievedChunk]) -> bool:
     """
@@ -27,6 +35,7 @@ def _has_valid_citations(text: str, chunks: List[RetrievedChunk]) -> bool:
     if not used:
         return False
     return used.issubset(cite_keys)
+
 
 def _build_context(chunks: List[RetrievedChunk]) -> str:
     """
@@ -42,6 +51,11 @@ async def ask_with_rag(query: str, k: int = 4) -> Tuple[str, List[RetrievedChunk
     """
     返回：回答文本 + 引用 chunks（便于你在后处理里展示引用详情）
     """
+
+    cache_key = (query, k)
+    if cache_key in _RAG_CACHE:
+        return _RAG_CACHE[cache_key]
+
     chunks = retrieve(query, k=k)
 
     logger.info(f"rag_retrieve query={query!r} got={len(chunks)}")
@@ -87,4 +101,10 @@ async def ask_with_rag(query: str, k: int = 4) -> Tuple[str, List[RetrievedChunk
     if not _has_valid_citations(text, chunks):
         return "资料不足：我无法在保证引用合规的情况下回答。请补充更明确的资料或换一种问法。", chunks
 
+    # 3) 过滤出实际被引用的 chunk
+    used = _extract_used_cite_keys(text)
+    if used:
+        chunks = [c for c in chunks if c.cite_key in used]
+
+    _RAG_CACHE[cache_key] = (text, chunks)
     return text, chunks

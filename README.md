@@ -123,6 +123,118 @@
 
 ---
 
+## Day 5 - LLM Judge：把“口语陪练”做成可评审的闭环
+
+### 当天目标
+- 在口语陪练流程中引入 **LLM 评审器（Judge）**：对用户回答进行评分、纠错、改写，并给出下一题。
+- 评审结果必须 **结构化输出（JSON）**，便于后续统计、回归评测、存档。
+
+### 新增功能
+- **SpeakingFeedback Schema（Pydantic）**
+  - overall/fluency/grammar/vocabulary/structure 分项评分
+  - top_mistakes（最多 3 条）
+  - improved_version（更自然的英文版本）
+  - chinese_coaching（中文可执行建议）
+  - next_question（下一题）
+- **speaking_judge.py**
+  - 只允许 LLM 输出合法 JSON（禁止 markdown/解释文本）
+  - 使用鲁棒 JSON 提取 + Pydantic 校验保证字段完整
+- **speaking_render.py**
+  - 将结构化反馈渲染为稳定的纯文本输出（避免 LLM 污染结构）
+
+### 解决的问题
+- 从“聊口语”升级为“可量化评审 + 可控纠错”
+- 避免 LLM 直接生成最终回复导致的字段污染（如 todos/title 等）
+- 为后续“记忆、评测、监控”建立标准数据结构
+
+
+---
+
+## Day 6 - Long-term Memory + Offline Eval：让产品可积累、可回归
+
+### 当天目标
+- 引入“长期记忆”：存用户画像与每次练习结果，形成可追踪的学习轨迹。
+- 建立“离线评测”：用固定样例回归测试 judge 输出质量，形成工程闭环。
+
+### 新增功能
+- **SQLite 数据库（data/edu_agent.db）**
+  - speaking_profile：用户画像（level/goal/daily_minutes 等）
+  - speaking_attempt：每次练习记录（题目、回答、分项分数、错误点、改写、下一题）
+- **memory/repo.py**
+  - upsert_profile：更新用户画像
+  - insert_attempt：写入练习记录
+  - get_recent_attempts / get_avg_scores：读取近期记录、计算均分
+- **离线评测框架**
+  - eval_cases.jsonl：评测样例集
+  - run_eval.py：批量调用 judge，输出 SUMMARY（平均分等）
+
+### 解决的问题
+- 让系统具备“持续学习轨迹”：用户越练越懂用户
+- judge 输出可回归、可量化：可做版本对比、A/B、漂移监控
+- 可在 README/面试中展示工程能力：数据、评测、可观测性闭环
+
+
+---
+
+## Day 7 - RAG + 引用规范 + 拒答策略：让回答有依据、可追溯
+
+### 当天目标
+- 给 Agent 增加“知识库检索能力（RAG）”，让建议来自资料而不是凭空生成。
+- 强制引用来源（C1/C2...），资料不足时拒答，降低幻觉风险。
+
+### 新增功能
+- **知识库目录 data/kb/**
+  - 支持 markdown/txt 资料（如自我介绍结构、STAR 方法、B1 语法等）
+- **SQLite FTS5 全文检索**
+  - kb_doc：文档元信息
+  - kb_chunk：分块内容
+  - kb_chunk_fts：FTS5 虚拟表（BM25 排序）
+- **ingest/reindex**
+  - 文档读取、清洗、切块（chunk+overlap）
+  - 写入 kb_chunk 与 kb_chunk_fts
+- **retrieve()**
+  - Top-K chunk 检索并返回可引用编号（C1/C2…）
+- **ask_with_rag()**
+  - 组装上下文片段（含编号）
+  - 强制模型按 [C1] 引用输出
+  - 无检索结果或相关度不足 -> “资料不足”拒答
+- **/kb/ask API**
+  - 输入 message/k
+  - 输出 answer + citations（cite_key/title/chunk_index/chunk_id）
+
+### 解决的问题
+- 建议可追溯：回答不再“看起来对但没依据”
+- 降低幻觉：资料不足时不胡编
+- 强可控：引用格式固定，便于后处理与审计
+
+
+---
+
+## Day 8 - RAG 工程加固：去重、引用过滤、体验优化
+
+### 当天目标
+- 让 RAG 输出更“干净可控”，避免重复引用、返回没用到的 citations。
+- 优化 ACK 文案，避免误导用户“下一条才有反馈”。
+
+### 新增功能 / 修复点
+- **检索结果去重**
+  - 同一 `(title, chunk_index)` 只保留一条，避免重复 chunk（如 star_method#0 出现两次）
+- **只返回“实际被引用”的 citations**
+  - 从 answer 中提取 `[C#]`，只保留对应 cite_key 的 chunks
+  - citations 结构更严谨、更像产品
+- **RAG 检索日志增强**
+  - 打印 `rag_retrieve got=k`、`rag_best_score`、titles，便于诊断命中率与相关度
+- **ACK 文案优化**
+  - 将“我下一条会给你...”改为“收到✅我正在分析...”
+  - 与同请求 SSE 输出完整反馈一致，不产生误导
+
+### 解决的问题
+- 引用更可信：返回的 citations 与文本一致
+- 输出更精炼：避免重复来源/无关来源
+- 产品体验更自然：同一次流式输出不再出现“下一条才反馈”的矛盾提示
+
+---
+
 ## 项目结构
 （以当前实现为参考，可能随迭代略有调整）
 
